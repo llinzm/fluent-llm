@@ -1,0 +1,397 @@
+version: 2.1
+
+meta:
+  source_document:
+    documented:
+      title: "FluentControl Application Software Manual 3.7 SP1"
+      manual_id: "399935"
+    inferred: {}
+    unknown: {}
+  extraction_quality: "merged_manual_grounded_plus_consumables"
+  warning:
+    - "Liquid classes and tip catalogs must be confirmed from the actual FluentControl installation"
+    - "Method inventory must be extracted from FluentControl exports"
+
+devices:
+
+  FCA:
+    type: liquid_handler
+    channels: [1, 8]
+    liquid_handling_mode: air_displacement
+    capabilities:
+      - aspirate
+      - dispense
+      - mix
+      - load_worklist
+      - execute_worklist
+      - liquid_level_detection_capacitive
+      - liquid_tracking
+      - air_gap
+      - blowout
+    tip_modes:
+      - disposable
+    constraints:
+      compatible_tip_types:
+        - FCA_DiTi_10uL
+        - FCA_DiTi_50uL
+        - FCA_DiTi_200uL
+        - FCA_DiTi_350uL
+        - FCA_DiTi_1000uL
+    meta:
+      documented: true
+
+  MCA96:
+    type: liquid_handler
+    channels: [1, 96]
+    capabilities:
+      - aspirate
+      - dispense
+      - transfer_liquid
+      - dynamic_tip_handling
+      - cLLD
+    constraints:
+      volume_range_uL: [1, 1000]
+    meta:
+      documented: true
+
+  MCA384:
+    type: liquid_handler
+    channels: [96, 384]
+    capabilities:
+      - aspirate
+      - dispense
+    constraints:
+      volume_ranges:
+        format_384: [0.25, 125]
+        format_96: [0.5, 500]
+    meta:
+      documented: true
+
+  RGA:
+    type: robotic_gripper_arm
+    capabilities:
+      - move_labware
+      - regrip
+      - grip_detection
+    meta:
+      documented: true
+
+  FCA_Gripper:
+    type: gripper
+    capabilities:
+      - detect_labware
+      - transfer_labware
+    meta:
+      documented: true
+
+  Te_Shake:
+    type: shaker
+    capabilities:
+      - shake
+      - set_frequency
+      - set_temperature
+    constraints:
+      frequency_hz: [2, 1800]
+      temperature_C: [15, 90]
+    meta:
+      documented: true
+
+  Heated_Incubator:
+    type: incubator
+    capabilities:
+      - incubate
+    meta:
+      documented: true
+
+  FRIDA_Reader:
+    type: reader
+    capabilities:
+      - read
+      - result_retrieval
+    meta:
+      documented: true
+
+tips:
+
+  FCA_DiTi_10uL:
+    type: disposable
+    max_volume_uL: 10
+    min_volume_uL: 0.5
+    conductive: true
+    filter_options: [filtered, non_filtered]
+    purity_levels: [standard, pure, sterile]
+
+  FCA_DiTi_50uL:
+    type: disposable
+    max_volume_uL: 50
+    dynamic_threshold_uL: 30
+    conductive: true
+    filter_options: [filtered, non_filtered]
+    purity_levels: [standard, pure, sterile]
+
+  FCA_DiTi_200uL:
+    type: disposable
+    max_volume_uL: 200
+    dynamic_threshold_uL: 120
+    conductive: true
+    filter_options: [filtered, non_filtered]
+    purity_levels: [standard, pure, sterile]
+
+  FCA_DiTi_350uL:
+    type: disposable
+    max_volume_uL: 350
+    conductive: true
+
+  FCA_DiTi_1000uL:
+    type: disposable
+    max_volume_uL: 1000
+    conductive: true
+
+  MCA96_disposable_tips:
+    type: disposable
+    channels: [1, 96]
+    conductive: true
+    volume_range_uL: [1, 1000]
+
+  MCA384_disposable_tips:
+    type: disposable
+    conductive: true
+    volume_ranges:
+      format_384: [0.25, 125]
+
+  MCA384_fixed_tips:
+    type: fixed
+    washable: true
+
+liquid_classes:
+
+  structure:
+    depends_on:
+      - arm_type
+      - tip_type
+    sections:
+      - aspirate
+      - dispense
+      - mix
+      - detection
+      - microscript
+
+  examples:
+
+    Water_Free:
+      dispense_modes:
+        - free
+      compatible_tip_types:
+        - FCA_DiTi_10uL
+        - FCA_DiTi_50uL
+        - FCA_DiTi_200uL
+        - FCA_DiTi_1000uL
+
+    Water_Contact_Wet:
+      dispense_modes:
+        - contact_wet
+      compatible_tip_types:
+        - FCA_DiTi_50uL
+        - FCA_DiTi_200uL
+
+    Viscous:
+      dispense_modes:
+        - contact_dry
+      constraints:
+        speed: low
+
+labware:
+
+  addressing:
+    numeric_positions: true
+    alphanumeric_wells: true
+
+  types:
+
+    Plate_96:
+      format: SBS
+      geometry: [8, 12]
+      max_volume_uL: 300
+
+    Plate_384:
+      format: SBS
+      geometry: [16, 24]
+      max_volume_uL: 100
+
+    Trough_25mL:
+      type: reagent_trough
+      channels: 1-8
+      max_volume_uL: 25000
+
+    Trough_100mL:
+      type: reagent_trough
+      channels: 1-12
+      max_volume_uL: 100000
+
+    Trough_300mL:
+      type: reagent_trough
+      max_volume_uL: 300000
+
+    Reservoir_MultiChannel:
+      type: reservoir
+
+    TubeRack_15mL:
+      type: tube_rack
+
+records:
+
+  A:
+    name: aspirate
+    volume_range: "0..large"
+
+  D:
+    name: dispense
+
+  W:
+    name: wash_or_replace
+
+  WD:
+    name: decontaminate
+
+  F:
+    name: flush
+
+  B:
+    name: break
+
+  S:
+    name: set_tip_type
+
+  C:
+    name: comment
+
+operations:
+
+  high_level:
+    - reagent_distribution
+    - mix
+    - incubate
+    - move_labware
+
+  low_level:
+    - aspirate
+    - dispense
+    - wash
+    - flush
+
+methods:
+
+  - name: ReagentDistribution
+    supports:
+      - reagent_distribution
+    requires:
+      - FCA
+
+  - name: ReagentDistribution_With_Mix
+    supports:
+      - reagent_distribution
+      - mix
+
+  - name: ReagentDistribution_With_Incubation
+    supports:
+      - reagent_distribution
+      - mix
+      - incubate
+
+compatibility:
+
+  tip_to_device:
+
+    FCA:
+      - FCA_DiTi_10uL
+      - FCA_DiTi_50uL
+      - FCA_DiTi_200uL
+      - FCA_DiTi_350uL
+      - FCA_DiTi_1000uL
+
+    MCA96:
+      - MCA96_disposable_tips
+
+    MCA384:
+      - MCA384_disposable_tips
+      - MCA384_fixed_tips
+
+  labware_to_operation:
+
+    reagent_distribution:
+      recommended:
+        - Trough_25mL
+        - Trough_100mL
+
+    mix:
+      compatible:
+        - Plate_96
+        - Plate_384
+
+    incubate:
+      compatible:
+        - Plate_96
+        - Plate_384
+
+consumable_properties:
+
+  tips:
+
+    conductive_required_for:
+      - liquid_level_detection
+
+    filter_required_for:
+      - contamination_sensitive_work
+      - PCR
+      - RNA_work
+
+  troughs:
+
+    recommended_for:
+      - reagent_distribution
+      - multi_dispense
+
+rules:
+
+  - name: tip_volume_limit
+    severity: error
+
+  - name: liquid_class_tip_compatibility
+    severity: error
+
+  - name: device_capability_required
+    severity: error
+
+  - name: no_mixing_fixed_and_disposable_tips
+    severity: error
+
+  - name: dynamic_diti_selection
+    logic:
+      up_to_30_uL: FCA_DiTi_50uL
+      up_to_120_uL: FCA_DiTi_200uL
+
+  - name: labware_presence_required
+    severity: error
+
+  - name: liquid_class_subclass_required
+    severity: error
+
+constraints:
+
+  execution:
+    requires_liquid_class: true
+    requires_tip: true
+    requires_labware: true
+
+  motion:
+    collision_avoidance: true
+    path_planning: true
+
+  runtime:
+    requires_device_available: true
+
+gaps:
+  - full_liquid_class_catalog
+  - full_tip_catalog
+  - full_labware_catalog
+  - fluent_method_inventory

@@ -1,0 +1,303 @@
+You are a senior software architect designing an AI-driven control system for liquid handling robots (specifically Tecan Fluent).
+
+## 🎯 OBJECTIVE
+
+Build a production-grade system where:
+
+* A user describes a lab protocol in natural language (English)
+* An LLM converts it into a structured intermediate representation (TDF)
+* The system validates, plans, and executes the workflow on a Tecan Fluent robot
+
+---
+
+## 🧱 SYSTEM ARCHITECTURE
+
+The system follows a compiler-like pipeline:
+
+English Protocol (IFU)
+→ LLM
+→ TDF (JSON intermediate representation)
+→ Validation Engine
+→ Execution Planner
+→ Execution Backend
+→ FluentControl Method (XML)
+OR
+→ PyFluent Script
+→ Robot Execution
+
+---
+
+## 🧩 KEY DESIGN PRINCIPLES
+
+1. The system is NOT direct LLM control of hardware.
+   It is a **compiler for biological workflows**.
+
+2. Strict separation of layers:
+
+   * Intent (LLM)
+   * Representation (TDF)
+   * Validation (physics constraints)
+   * Planning (execution strategy)
+   * Execution (robot)
+
+3. Determinism and safety are mandatory.
+
+---
+
+## 📦 INTERMEDIATE REPRESENTATION (TDF)
+
+The TDF (Task Description Format) describes:
+
+* liquids
+* labware
+* steps (reagent_distribution, mix, incubate, etc.)
+* volumes
+* execution preferences
+
+---
+
+## ⚙️ CAPABILITY REGISTRY (CORE COMPONENT)
+
+We define a YAML-based capability registry that models:
+
+* Devices (FCA, MCA96, MCA384, RGA, etc.)
+* Tips (DiTi types, MCA tips)
+* Liquid classes (dependent on arm + tip)
+* Labware (plates, troughs, reservoirs)
+* Worklist records (A, D, W, F, etc.)
+* Operations (high-level + low-level)
+* Methods (Fluent execution mapping)
+* Rules (validation constraints)
+* Compatibility matrices
+* Consumable properties
+* Global constraints
+
+This registry is:
+→ The "physics engine" of the system
+
+---
+
+## 🔬 FLUENTCONTROL REALITIES (MUST BE RESPECTED)
+
+* Liquid classes depend on:
+  → arm type
+  → tip type
+
+* Worklist records:
+  A = aspirate
+  D = dispense
+  W = wash
+  F = flush
+  etc.
+
+* Dynamic DiTi selection:
+  → ≤30 µL → 50 µL tips
+  → ≤120 µL → 200 µL tips
+
+* Dispense modes:
+  → free
+  → contact wet
+  → contact dry
+
+* Devices:
+  → FCA (liquid handling arm)
+  → MCA96 / MCA384
+  → RGA (gripper)
+  → incubator / shaker / reader
+
+---
+
+## 🧠 EXECUTION PLANNER (CRITICAL LAYER)
+
+The planner decides:
+
+INPUT:
+→ validated TDF
+
+OUTPUT:
+→ execution plan
+
+Two modes:
+
+1. Method-based execution
+   → Fluent XML methods
+2. Script-based execution
+   → PyFluent
+
+Planner logic:
+
+* Match steps to known methods
+* Otherwise fallback to script generation
+
+---
+
+## 📦 PYTHON PACKAGE STRUCTURE
+
+Create a package:
+
+capability_registry/
+**init**.py
+models.py
+registry.py
+loader.py
+validator.py
+data/
+registry.yaml
+README.md
+
+---
+
+## 🧩 PACKAGE REQUIREMENTS
+
+### models.py
+
+Define dataclasses for:
+
+* Device
+* TipType
+* LiquidClass
+* Labware
+* Operation
+* Rule
+
+Each supports:
+
+* meta.documented
+* meta.inferred
+* meta.unknown
+
+---
+
+### registry.py
+
+* In-memory representation of registry
+* Access methods:
+
+  * get_device()
+  * get_tip()
+  * get_liquid_class()
+  * validate_compatibility()
+
+---
+
+### loader.py
+
+* Load YAML into models
+* Validate schema
+* Raise clear errors
+
+---
+
+### validator.py
+
+Validation engine must support:
+
+* tip volume constraints
+* liquid class compatibility
+* device capability checks
+* labware constraints
+
+Must distinguish:
+
+* hard errors (documented violations)
+* soft warnings (inferred constraints)
+
+---
+
+## 📄 CAPABILITY REGISTRY (YAML)
+
+The registry.yaml must include:
+
+### Devices
+
+* FCA, MCA96, MCA384, RGA, incubator, shaker, reader
+
+### Tips
+
+* DiTi 10, 50, 200, 350, 1000 µL
+* MCA tips
+* properties: volume, conductive, filter, purity
+
+### Liquid Classes
+
+* structured by arm + tip
+* dispense modes
+* constraints
+
+### Labware
+
+* plates (96, 384)
+* troughs (25 mL, 100 mL, 300 mL)
+* reservoirs
+* tube racks
+
+### Records
+
+* A, D, W, WD, F, B, S, C
+
+### Operations
+
+* high-level (distribution, mix, incubate)
+* low-level (aspirate, dispense)
+
+### Methods
+
+* mapping to Fluent XML methods
+
+### Compatibility
+
+* tip ↔ device
+* labware ↔ operation
+
+### Rules
+
+* volume limits
+* compatibility checks
+* no mixed tip modes
+* dynamic tip selection
+
+### Constraints
+
+* motion (collision avoidance)
+* execution requirements
+
+---
+
+## ⚠️ CRITICAL DESIGN INSIGHTS
+
+* operations ≠ methods
+* registry drives validation AND planning
+* LLM must be grounded using registry
+* runtime state validation is required before execution
+
+---
+
+## 🚀 EXPECTED OUTPUTS
+
+1. A full `registry.yaml`
+
+2. A working Python package implementing:
+
+   * registry loader
+   * validation engine
+   * compatibility checks
+
+3. Clean, production-ready code (not toy examples)
+
+---
+
+## 🎯 FINAL GOAL
+
+A system that:
+
+* safely converts natural language into executable robotic workflows
+* enforces physical and system constraints
+* scales to multiple instruments and workflows
+
+---
+
+Proceed step by step:
+
+1. Generate full registry.yaml
+2. Then build the Python package
+3. Then extend into execution planner if requested
