@@ -1,48 +1,60 @@
-# Ignore compiled Python files and caches
+# Python
 __pycache__/
 *.py[cod]
-*$py.class
-*.pyc
-
-# Ignore C extensions
+*.pyo
+*.pyd
 *.so
-
-# Distribution / build artifacts
-build/
-dist/
+*.egg
 *.egg-info/
-
-# Environment files
-.env
-.env.local
-.env.*.local
+dist/
+build/
+*.whl
 
 # Virtual environments
 venv/
-env/
-ENV/
+.env/
+.venv/
 
-# Ignore Word documents
-*.docx
+# IDEs
+.vscode/
+.idea/
+*.swp
 
-# OS-generated files
+# OS
 .DS_Store
 Thumbs.db
 
-# Logs and temporary files
+# Logs
 *.log
+
+# Test / coverage
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Environment variables
+.env
+
+# Large data / temp files
+*.csv
+*.xlsx
+*.parquet
 *.tmp
 
-# Node modules
-node_modules/
+# Generated artifacts
+*.zip
 
-# Editor configuration
-.idea/
-.vscode/
+# Fluent / lab outputs
+output/
+results/
 
-# Coverage reports
-.coverage
-coverage.xml
+# Local configs
+config.local.yaml
 
-# Test cache
-.pytest_cache/
+# Future AI outputs
+generated_code/
+llm_outputs/
+tmp_workflows/
