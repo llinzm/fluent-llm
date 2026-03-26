@@ -667,3 +667,11 @@ This separation ensures:
 * LLM never controls hardware directly
 * all robot actions remain deterministic
 * `FluentControl` remains the authoritative execution layer
+
+
+## TODO:
+
+* Make planner smarter (true optimization engine)
+* Add execution feedback loop
+* Turn this into a productized SDK
+* Design UI / API layer on top

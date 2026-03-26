@@ -2,6 +2,12 @@
 from dataclasses import dataclass, field
 from typing import List, Dict, Optional
 
+STEP_SCHEMA = {
+    "reagent_distribution": ["source", "target", "volume_uL"],
+    "mix": ["target", "volume_uL"],
+    "incubate": ["labware", "location"],
+}
+
 @dataclass
 class Step:
     type: str

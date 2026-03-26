@@ -58,6 +58,8 @@ class ExecutionLoop:
         original_format: str = "JSON",
         max_retries: int = 2,
         stop_on_execution_error: bool = True,
+        tdf_mode: str = "library",
+        tdf_name: str = "simple_distribution",
     ):
         self.llm = llm
         self.decomposer = decomposer
@@ -70,6 +72,8 @@ class ExecutionLoop:
         self.original_format = original_format
         self.max_retries = max_retries
         self.stop_on_execution_error = stop_on_execution_error
+        self.tdf_mode = tdf_mode
+        self.tdf_name = tdf_name
 
     def run(self, ifu_text: str) -> ExecutionLoopResult:
         """Run the full closed-loop execution pipeline starting from an IFU string."""
@@ -82,36 +86,26 @@ class ExecutionLoop:
 
             # 1) IFU -> TDF
             try:
-                # tdf = self.llm.generate_tdf(current_prompt)
-                tdf = Workflow(
-                            steps=[
-                                Step(
-                                    type="reagent_distribution",
-                                    params={
-                                        "volume_uL": 50,
-                                        "liquid": "DPBS",
-                                        "liquid_class": "Water_Free",        # ✅ REQUIRED
-                                        "tip_type": "FCA_DiTi_200uL",        # ✅ REQUIRED
-                                        "source": "Trough_25mL:A1",          # ✅ valid labware
-                                        "target": "Plate_96:A1"              # ✅ correct naming
-                                    }
-                                ),
-                                Step(
-                                    type="incubate",
-                                    params={
-                                        "time_s": 600,
-                                        "location": "Heated_Incubator",      # ✅ matches device
-                                        "labware": "Plate_96"                # ✅ required context
-                                    }
-                                )
-                            ]
-                        )
+                if self.tdf_mode == "library":
+                    import execution_engine.orchestration.tdf_library as tdf_library
+
+                    if not hasattr(tdf_library, self.tdf_name):
+                        raise ValueError(f"TDF '{self.tdf_name}' not found in library")
+
+                    generated_tdf = getattr(tdf_library, self.tdf_name)()
+
+                elif self.tdf_mode == "llm":
+                    generated_tdf = self.llm.generate_tdf(current_prompt)
+
+                else:
+                    raise ValueError(f"Unknown tdf_mode: {self.tdf_mode}")
+
             except Exception as exc:
                 return ExecutionLoopResult(
                     success=False,
                     attempts=attempts,
                     ifu_text=ifu_text,
-                    error=f"LLM generation failed: {exc}",
+                    error=f"TDF generation failed: {exc}",
                     execution_log=execution_log,
                     state=self._extract_state(),
                 )
@@ -124,13 +118,13 @@ class ExecutionLoop:
 
             # 2) TDF -> Workflow
             try:
-                workflow = self.decomposer.decompose(tdf)
+                workflow = self.decomposer.decompose(generated_tdf)
             except Exception as exc:
                 return ExecutionLoopResult(
                     success=False,
                     attempts=attempts,
                     ifu_text=ifu_text,
-                    tdf=tdf,
+                    tdf=generated_tdf,
                     error=f"Workflow decomposition failed: {exc}",
                     execution_log=execution_log,
                     state=self._extract_state(),
@@ -151,7 +145,7 @@ class ExecutionLoop:
                     success=False,
                     attempts=attempts,
                     ifu_text=ifu_text,
-                    tdf=tdf,
+                    tdf=generated_tdf,
                     workflow=workflow,
                     error=f"Validation crashed: {exc}",
                     execution_log=execution_log,
@@ -159,6 +153,7 @@ class ExecutionLoop:
                 )
 
             if not getattr(validation_result, "valid", False) and not getattr(validation_result, "is_valid", False):
+
                 feedback = self.feedback_builder.build_feedback(validation_result)
                 retry_prompt = self.feedback_builder.build_retry_prompt(
                     validation_result,
@@ -173,21 +168,24 @@ class ExecutionLoop:
                     "warning_count": len(getattr(feedback, "warnings", [])),
                 })
 
-                if attempts > self.max_retries:
+                if self.tdf_mode == "library":
                     return ExecutionLoopResult(
                         success=False,
                         attempts=attempts,
                         ifu_text=ifu_text,
-                        tdf=tdf,
+                        tdf=generated_tdf,
                         workflow=workflow,
                         validation_feedback=feedback,
                         retry_prompt=retry_prompt,
-                        error="Validation failed after max retries",
+                        error="Validation failed (library mode - no retry)",
                         execution_log=execution_log,
                         state=self._extract_state(),
                     )
 
-                # Closed-loop retry: feed structured feedback back to the LLM.
+                # existing retry logic
+                if attempts > self.max_retries:
+                    return ExecutionLoopResult(...)
+
                 current_prompt = retry_prompt
                 continue
 
@@ -207,7 +205,7 @@ class ExecutionLoop:
                         success=False,
                         attempts=attempts,
                         ifu_text=ifu_text,
-                        tdf=tdf,
+                        tdf=generated_tdf,
                         workflow=workflow,
                         error=f"Simulation crashed: {exc}",
                         execution_log=execution_log,
@@ -226,7 +224,7 @@ class ExecutionLoop:
                         success=False,
                         attempts=attempts,
                         ifu_text=ifu_text,
-                        tdf=tdf,
+                        tdf=generated_tdf,
                         workflow=workflow,
                         simulation_result=simulation_result,
                         error="Simulation failed",
@@ -254,7 +252,7 @@ class ExecutionLoop:
                         success=False,
                         attempts=attempts,
                         ifu_text=ifu_text,
-                        tdf=tdf,
+                        tdf=generated_tdf,
                         workflow=workflow,
                         plans=plans,
                         simulation_result=simulation_result,
@@ -308,7 +306,7 @@ class ExecutionLoop:
                             success=False,
                             attempts=attempts,
                             ifu_text=ifu_text,
-                            tdf=tdf,
+                            tdf=generated_tdf,
                             workflow=workflow,
                             plans=plans,
                             simulation_result=simulation_result,
@@ -321,7 +319,7 @@ class ExecutionLoop:
                 success=True,
                 attempts=attempts,
                 ifu_text=ifu_text,
-                tdf=tdf,
+                tdf=generated_tdf,
                 workflow=workflow,
                 plans=plans,
                 simulation_result=simulation_result,

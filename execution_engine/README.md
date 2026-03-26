@@ -2,30 +2,32 @@
 
 ## 🎯 Overview
 
-The `execution_engine` is a modular Python package that transforms a **natural language lab protocol (IFU)** into a **validated, optimized, and executable workflow** on Tecan Fluent systems.
+The `execution_engine` is a modular Python framework that transforms a **natural language lab protocol (IFU)** into a **validated, optimized, and executable workflow** on Tecan Fluent systems.
 
-It acts as a **compiler + optimizer + runtime bridge** for laboratory automation.
+It acts as an **AI-powered compiler + optimizer + runtime bridge** for laboratory automation.
 
 ---
 
 ## 🧱 Core Concept (End-to-End)
 
 ```text
-Natural Language (IFU)
+Natural Language (IFU) / TDF Library
         ↓
-LLM Module (PromptBuilder + LLMClient)
+LLM Module (optional)
         ↓
-Structured Assay Model (TDF / JSON)
+Structured Assay Model (TDF / Workflow)
         ↓
 Workflow Decomposition
         ↓
-Validation Engine
+Validation (Schema + Registry + Constraints)
         ↓
-Execution Planner
+Execution Planner (Method selection + scoring)
         ↓
-PyFluent Runtime Adapter
+Runtime Adapter (PyFluent)
         ↓
 FluentControl Execution
+        ↓
+State Update
 ```
 
 ---
@@ -34,12 +36,12 @@ FluentControl Execution
 
 The system:
 
-* Converts human-readable protocols into structured workflows
-* Enforces **structured JSON output from LLMs**
-* Validates against real hardware constraints (tips, volumes, labware)
-* Optimizes execution using a capability-driven planner
-* Executes workflows step-by-step via FluentControl
-* Provides structured feedback to LLMs when errors occur (self-correcting loop)
+- Converts human-readable protocols into structured workflows
+- Supports **LLM-generated or library-based workflows (TDF)**
+- Enforces **schema + registry-driven validation**
+- Optimizes execution using a capability-aware planner
+- Executes workflows via FluentControl
+- Provides structured feedback for retry loops (LLM mode)
 
 ---
 
@@ -48,79 +50,89 @@ The system:
 ```text
 execution_engine/
 │
-├── capability_registry/      # System capabilities (devices, tips, liquids, labware)
-├── llm/                      # IFU → TDF (PromptBuilder + LLMClient)
-├── models/                   # Core data structures (Step, Workflow, Plan, Feedback)
-├── workflow/                 # Assay decomposition + state tracking
-├── planner/                  # Method selection + scoring engine
-├── validation/               # Constraint validation + LLM feedback
-├── runtime/                  # Execution adapters (PyFluent)
-├── orchestration/            # End-to-end execution loop
-├── utils/                    # Logging, helpers
-│
-└── README.md
+├── capability_registry/   # Devices, methods, tips, labware, liquids
+├── llm/                   # IFU → TDF (optional)
+├── models/                # Core structures (Workflow, Step, Plan)
+├── workflow/              # Decomposition + state handling
+├── planner/               # Candidate selection + scoring
+├── validation/            # Schema + constraint validation
+├── runtime/               # PyFluent adapter
+├── orchestration/         # Execution loop (core pipeline)
+├── utils/                 # Helpers / logging
+```
+
+---
+
+## 🧠 High-Level Architecture
+
+```mermaid
+flowchart LR
+
+A[IFU or TDF Library] --> B[LLM (optional)]
+B --> C[Workflow Decomposer]
+C --> D[Workflow Object]
+
+D --> E[Validation Layer]
+E -->|Valid| F[Planner]
+E -->|Invalid| G[Feedback Builder]
+G --> B
+
+F --> H[Execution Plan]
+H --> I[Runtime Adapter]
+I --> J[FluentControl]
+J --> K[State Manager]
 ```
 
 ---
 
 ## ⚙️ Key Components
 
-### 1. LLM Layer (Entry Point)
+### 1. LLM Layer (Optional)
 
-Transforms IFU → structured assay (TDF)
+Transforms IFU → TDF
 
 ```python
-from execution_engine.llm import LLMClient
-
-client = LLMClient()
-tdf = client.generate_tdf(ifu_text)
+tdf = llm.generate_tdf(ifu_text)
 ```
 
-✔ Structured JSON enforced
-✔ Retry loop on invalid output
-✔ Capability hints supported
+Supports:
+- Structured JSON enforcement
+- Retry on invalid outputs
 
 ---
 
 ### 2. Workflow Layer
 
-Transforms TDF into executable workflow steps.
-
 ```python
 workflow = decomposer.decompose(tdf)
 ```
+
+Transforms TDF → internal execution structure
 
 ---
 
 ### 3. Validation Layer
 
-Ensures physical and system constraints are respected.
+Ensures correctness:
 
-* tip capacity
-* liquid compatibility
-* labware constraints
+- Required fields (STEP_SCHEMA)
+- Tip / volume compatibility
+- Labware presence
+- Registry constraints
 
 ```python
 result = validator.validate_workflow(workflow)
 ```
 
-If invalid:
-
-```python
-retry_prompt = feedback_builder.build_retry_prompt(result)
-```
-
-👉 This feeds back into the LLM
-
 ---
 
 ### 4. Planner (Core Intelligence)
 
-Selects the best execution method per step using:
+Selects best execution method:
 
-* capability registry
-* constraint-aware scoring
-* efficiency heuristics
+- Capability matching
+- Constraint-aware scoring
+- Variable mapping
 
 ```python
 plan = planner.plan(step)
@@ -128,163 +140,146 @@ plan = planner.plan(step)
 
 ---
 
-### 5. Runtime Adapter (PyFluent)
+### 5. Runtime Adapter
 
-Executes selected methods via FluentControl:
+Executes on Fluent:
 
 ```python
-runtime.run_method(method_name, variables)
+runtime_adapter.run(method_name, variables)
 ```
-
-Supports:
-
-* MethodManager mode
-* Low-level runtime mode
 
 ---
 
-### 6. Orchestration Layer
+### 6. Orchestration (Execution Loop)
 
-Coordinates the full execution pipeline:
+Central brain:
 
 ```python
-result = execution_loop.run(ifu_text)
+result = execution_loop.run(input)
 ```
 
 Handles:
-
-* IFU → TDF (LLM)
-* decomposition
-* validation
-* feedback loop
-* planning
-* execution
-* state updates
-
----
-
-## 🔁 Feedback Loop (Critical)
-
-If validation fails, structured feedback is generated:
-
-```json
-{
-  "type": "tip_volume_exceeded",
-  "message": "Volume exceeds tip capacity",
-  "suggestion": ["Use larger tip"]
-}
-```
-
-Converted into LLM retry prompt:
-
-```text
-The assay you generated is invalid.
-Fix the following issues...
-```
-
-👉 Enables **self-correcting workflows**
+- TDF sourcing (LLM or library)
+- decomposition
+- validation
+- planning
+- execution
+- retries (LLM mode)
+- state tracking
 
 ---
 
-## 🧪 Minimal End-to-End Example
+## 🔁 Execution Modes
+
+### 🔹 Library Mode (deterministic, testing)
 
 ```python
-from execution_engine.llm import LLMClient
-from execution_engine.orchestration import ExecutionLoop
-
-# Initialize components (simplified)
-llm = LLMClient()
-execution_loop = ExecutionLoop(...)
-
-ifu = """
-Distribute 50 µL buffer into a 96-well plate.
-Incubate for 10 minutes.
-"""
-
-# Step 1: IFU → TDF
-tdf = llm.generate_tdf(ifu)
-
-# Step 2: Execute
-result = execution_loop.run(tdf)
-
-if not result.success:
-    print(result.retry_prompt)
-else:
-    print("Execution completed")
+tdf_mode = "library"
+tdf_name = "distribution_mix_incubate"
 ```
+
+- No retries
+- Fail-fast behavior
+- Ideal for debugging & validation
+
+---
+
+### 🔹 LLM Mode (adaptive)
+
+```python
+tdf_mode = "llm"
+```
+
+- Generates workflows dynamically
+- Uses validation feedback loop
+- Enables self-correcting execution
+
+---
+
+## 🧠 Data Flow Summary
+
+| Stage        | Input        | Output            |
+|--------------|-------------|-------------------|
+| LLM          | IFU         | TDF               |
+| Decomposer   | TDF         | Workflow          |
+| Validation   | Workflow    | Validated workflow|
+| Planner      | Step        | Plan              |
+| Runtime      | Plan        | Execution         |
+| State        | Step        | Updated state     |
 
 ---
 
 ## 🧠 Design Principles
 
 ### 1. Separation of Concerns
-
-* Registry → knowledge
-* LLM → interpretation
-* Validation → safety
-* Planner → intelligence
-* Runtime → execution
-* Orchestration → coordination
+Each module has a clear responsibility:
+- LLM → interpretation
+- Validation → safety
+- Planner → optimization
+- Runtime → execution
 
 ---
 
-### 2. Deterministic Execution
-
-Same TDF → same execution plan
-
----
-
-### 3. Registry-Driven Logic
-
-All decisions rely on explicit capability definitions
+### 2. Registry-Driven Logic
+All decisions are grounded in explicit system capabilities.
 
 ---
 
-### 4. Explainability
-
-Each plan includes:
-
-* score
-* reasoning
-* constraint evaluation
+### 3. Deterministic Execution (Library Mode)
+Same input → same execution
 
 ---
 
-### 5. Self-Correcting System
+### 4. Self-Correcting Loop (LLM Mode)
 
 ```text
-LLM → Validation → Feedback → LLM → Improved TDF
+LLM → Validation → Feedback → LLM → Improved Output
 ```
 
 ---
 
-## 🚀 What Makes This Different
+### 5. Explainability
+Planner decisions are traceable and debuggable.
 
-This is not just automation.
+---
 
-It is:
+## 🚀 What Makes This System Different
+
+This system behaves like a **compiler for lab automation**:
 
 ```text
-A compiler and optimizer for biological workflows
+IFU → Intermediate Representation → Optimized Plan → Execution
 ```
 
 Where:
+- IFU = source code
+- TDF = IR
+- Registry = constraints
+- Planner = optimizer
+- Runtime = executor
 
-* IFU = source code
-* TDF = intermediate representation
-* Registry = hardware constraints
-* Planner = optimizer
-* Runtime = execution engine
+---
+
+## 🧪 Minimal Execution Example
+
+```python
+result = execution_loop.run(ifu_text)
+
+if result.success:
+    print("Execution completed")
+else:
+    print(result.error)
+```
 
 ---
 
 ## 🔮 Future Extensions
 
-* Automatic tip & liquid class inference
-* Multi-instrument orchestration
-* Parallel workflow execution (DAG)
-* Learning-based optimization
-* Real-time telemetry feedback loop
+- Advanced planner (multi-objective optimization)
+- Execution feedback loop (closed-loop learning)
+- SDK / API productization
+- UI layer for workflow design
+- Multi-instrument orchestration
 
 ---
 
@@ -296,4 +291,4 @@ The `execution_engine` turns:
 Human intent → Structured → Validated → Optimized → Executed
 ```
 
-With safety, explainability, and scalability at its core.
+into real-world lab automation — safely, transparently, and at scale.

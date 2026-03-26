@@ -2,7 +2,7 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
 from execution_engine.models.feedback import FeedbackItem, ValidationFeedback
-from execution_engine.models.workflow import Step
+from execution_engine.models.workflow import Step, STEP_SCHEMA
 
 
 @dataclass
@@ -42,6 +42,9 @@ class ValidatorWrapper:
         errors: List[Dict[str, Any]] = []
         warnings: List[Dict[str, Any]] = []
 
+        # ---------------------------------------------
+        # Registry-level validation (device, method, etc.)
+        # ---------------------------------------------
         if self.registry_validator is not None:
             try:
                 try:
@@ -59,30 +62,71 @@ class ValidatorWrapper:
                     )
                 )
 
-        errors.extend(self._validate_required_fields(step))
+        # ---------------------------------------------
+        # Semantic validation only
+        # ---------------------------------------------
         errors.extend(self._validate_tip_volume(step))
         errors.extend(self._validate_liquid_tip_compatibility(step))
         errors.extend(self._validate_labware_presence(step))
+
+        # ---------------------------------------------
+        # Warnings (soft checks)
+        # ---------------------------------------------
         warnings.extend(self._validate_unknowns(step))
 
-        return ValidationResult(valid=len(errors) == 0, errors=errors, warnings=warnings)
+        return ValidationResult(
+            valid=len(errors) == 0,
+            errors=errors,
+            warnings=warnings
+        )
 
     def validate_workflow(self, workflow) -> ValidationResult:
         all_errors: List[Dict[str, Any]] = []
         all_warnings: List[Dict[str, Any]] = []
 
         for idx, step in enumerate(workflow.steps):
+            # ---------------------------------------------
+            # 1) Schema-level required field validation
+            # ---------------------------------------------
+            required_fields = STEP_SCHEMA.get(step.type, [])
+            missing = [f for f in required_fields if f not in step.params]
+
+            if missing:
+                all_errors.append(
+                    self._make_issue(
+                        issue_type="missing_required_field",
+                        message=f"Missing required fields for step '{step.type}': {missing}",
+                        severity="error",
+                        suggestion=[f"Add values for: {', '.join(missing)}"],
+                        context={
+                            "step_type": step.type,
+                            "missing_fields": missing,
+                            "step_index": idx,
+                        },
+                    )
+                )
+
+            # ---------------------------------------------
+            # 2) Existing step validation
+            # ---------------------------------------------
             result = self.validate_step(step)
+
             for err in result.errors:
                 err.setdefault("context", {})
                 err["context"]["step_index"] = idx
+
             for warn in result.warnings:
                 warn.setdefault("context", {})
                 warn["context"]["step_index"] = idx
+
             all_errors.extend(result.errors)
             all_warnings.extend(result.warnings)
 
-        return ValidationResult(valid=len(all_errors) == 0, errors=all_errors, warnings=all_warnings)
+        return ValidationResult(
+            valid=len(all_errors) == 0,
+            errors=all_errors,
+            warnings=all_warnings,
+        )
 
     def _validate_required_fields(self, step: Step) -> List[Dict[str, Any]]:
         issues: List[Dict[str, Any]] = []

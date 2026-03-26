@@ -109,6 +109,8 @@ def main():
         runtime_adapter=runtime_adapter,
         state_manager=state_manager,
         max_retries=2,
+        tdf_mode="library",
+        tdf_name="distribution_mix_incubate"
     )
 
      # --------------------------------------------------
