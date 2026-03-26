@@ -111,11 +111,19 @@ def main():
         max_retries=2,
     )
 
-    # --------------------------------------------------
-    # RUN
+     # --------------------------------------------------
+    # RUN (WITH DEBUGGING)
     # --------------------------------------------------
 
-    result = loop.run(ifu_text)
+    import traceback
+
+    try:
+        result = loop.run(ifu_text)
+
+    except Exception as e:
+        print("\n🚨 HARD FAILURE DURING EXECUTION LOOP 🚨")
+        traceback.print_exc()
+        raise
 
     print("\n=== FINAL RESULT ===")
     print(f"success: {result.success}")
@@ -124,10 +132,10 @@ def main():
     print(f"execution log entries: {len(result.execution_log)}")
 
     if result.error:
-        print(f"error: {result.error}")
+        print(f"\n❌ error: {result.error}")
 
     if result.retry_prompt:
-        print("\nRetry prompt:")
+        print("\n🔁 Retry prompt:")
         print(result.retry_prompt)
 
 

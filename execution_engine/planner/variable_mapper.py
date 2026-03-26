@@ -1,6 +1,7 @@
 
 class VariableMapper:
     def map(self, step, method):
+        # Keep flat mapping (no nested assumptions)
         return {
             "volume_uL": step.params.get("volume_uL"),
             "tip_type": step.params.get("tip_type"),
