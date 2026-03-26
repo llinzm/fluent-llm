@@ -37,6 +37,7 @@ htmlcov/
 
 # Environment variables
 .env
+*.env
 
 # Large data / temp files
 *.csv

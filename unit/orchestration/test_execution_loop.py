@@ -1,18 +1,23 @@
-from dataclasses import dataclass
-
 from execution_engine.models.feedback import FeedbackItem, ValidationFeedback
 from execution_engine.models.workflow import Step, Workflow
 from execution_engine.orchestration.execution_loop import ExecutionLoop
 
 
-class MockAssay:
-    def __init__(self, steps):
-        self.steps = steps
+class MockLLM:
+    def __init__(self, outputs):
+        self.outputs = outputs
+        self.calls = 0
+
+    def generate_tdf(self, text):
+        out = self.outputs[self.calls]
+        self.calls += 1
+        return out
 
 
 class MockDecomposer:
-    def decompose(self, assay):
-        return Workflow(steps=assay.steps)
+    def decompose(self, tdf):
+        steps = [Step(type=s["type"], params=s.get("params", {})) for s in tdf["steps"]]
+        return Workflow(steps=steps)
 
 
 class MockValidationResult:
@@ -35,11 +40,14 @@ class MockValidationResult:
 
 
 class MockValidator:
-    def __init__(self, valid=True):
-        self.valid = valid
+    def __init__(self, valid_sequence):
+        self.valid_sequence = valid_sequence
+        self.calls = 0
 
     def validate_workflow(self, workflow):
-        return MockValidationResult(valid=self.valid)
+        valid = self.valid_sequence[self.calls]
+        self.calls += 1
+        return MockValidationResult(valid=valid)
 
 
 class MockFeedbackBuilder:
@@ -60,6 +68,12 @@ class MockPlanner:
         }
 
 
+class MockRuntimeResult:
+    def __init__(self, success=True):
+        self.success = success
+        self.raw_result = {"ok": success}
+
+
 class MockRuntimeAdapter:
     def __init__(self, fail_on_method=None):
         self.fail_on_method = fail_on_method
@@ -69,7 +83,7 @@ class MockRuntimeAdapter:
         self.calls.append((method_name, variables))
         if method_name == self.fail_on_method:
             raise RuntimeError("runtime failure")
-        return {"ok": True, "method_name": method_name}
+        return MockRuntimeResult(success=True)
 
 
 class MockStateManager:
@@ -80,78 +94,123 @@ class MockStateManager:
         self.executed_steps.append(step.type)
 
 
+class MockSimulator:
+    def __init__(self, success=True):
+        self.success = success
+
+    def simulate(self, workflow):
+        return {"success": self.success, "checked_steps": len(workflow.steps)}
+
+
 def test_execution_loop_success_path():
-    assay = MockAssay([
-        Step(type="fill_plate", params={"volumes": {"A1": 50}}),
-        Step(type="incubate", params={}),
-    ])
+    llm = MockLLM(outputs=[{"steps": [{"type": "fill_plate", "params": {}}, {"type": "incubate", "params": {}}]}])
 
     runtime = MockRuntimeAdapter()
     state = MockStateManager()
 
     loop = ExecutionLoop(
+        llm=llm,
         decomposer=MockDecomposer(),
-        validator=MockValidator(valid=True),
+        validator=MockValidator(valid_sequence=[True]),
         feedback_builder=MockFeedbackBuilder(),
         planner=MockPlanner(),
         runtime_adapter=runtime,
         state_manager=state,
+        simulator=MockSimulator(success=True),
     )
 
-    result = loop.run(assay)
+    result = loop.run("test IFU")
 
     assert result.success is True
+    assert result.attempts == 1
     assert len(result.plans) == 2
-    assert len(runtime.calls) == 2
+    assert len(result.execution_log) >= 5
     assert state.executed_steps == ["fill_plate", "incubate"]
-    assert result.retry_prompt is None
 
 
-def test_execution_loop_returns_feedback_on_validation_failure():
-    assay = MockAssay([
-        Step(type="reagent_distribution", params={"volume_uL": 50}),
+def test_execution_loop_retries_after_validation_failure():
+    llm = MockLLM(outputs=[
+        {"steps": [{"type": "reagent_distribution", "params": {}}]},
+        {"steps": [{"type": "incubate", "params": {}}]},
     ])
 
     loop = ExecutionLoop(
+        llm=llm,
         decomposer=MockDecomposer(),
-        validator=MockValidator(valid=False),
+        validator=MockValidator(valid_sequence=[False, True]),
         feedback_builder=MockFeedbackBuilder(),
         planner=MockPlanner(),
         runtime_adapter=MockRuntimeAdapter(),
         state_manager=MockStateManager(),
+        simulator=MockSimulator(success=True),
+        max_retries=2,
     )
 
-    result = loop.run(assay)
+    result = loop.run("test IFU")
+    assert result.success is True
+    assert result.attempts == 2
 
+
+def test_execution_loop_returns_failure_after_max_retries():
+    llm = MockLLM(outputs=[
+        {"steps": [{"type": "reagent_distribution", "params": {}}]},
+        {"steps": [{"type": "reagent_distribution", "params": {}}]},
+        {"steps": [{"type": "reagent_distribution", "params": {}}]},
+    ])
+
+    loop = ExecutionLoop(
+        llm=llm,
+        decomposer=MockDecomposer(),
+        validator=MockValidator(valid_sequence=[False, False, False]),
+        feedback_builder=MockFeedbackBuilder(),
+        planner=MockPlanner(),
+        runtime_adapter=MockRuntimeAdapter(),
+        state_manager=MockStateManager(),
+        simulator=MockSimulator(success=True),
+        max_retries=2,
+    )
+
+    result = loop.run("test IFU")
     assert result.success is False
-    assert result.validation_feedback is not None
-    assert result.retry_prompt == "Retry in JSON"
-    assert result.plans == []
+    assert "Validation failed" in result.error
+
+
+def test_execution_loop_stops_on_simulation_failure():
+    llm = MockLLM(outputs=[{"steps": [{"type": "fill_plate", "params": {}}]}])
+
+    loop = ExecutionLoop(
+        llm=llm,
+        decomposer=MockDecomposer(),
+        validator=MockValidator(valid_sequence=[True]),
+        feedback_builder=MockFeedbackBuilder(),
+        planner=MockPlanner(),
+        runtime_adapter=MockRuntimeAdapter(),
+        state_manager=MockStateManager(),
+        simulator=MockSimulator(success=False),
+    )
+
+    result = loop.run("test IFU")
+    assert result.success is False
+    assert result.error == "Simulation failed"
 
 
 def test_execution_loop_stops_on_runtime_error():
-    assay = MockAssay([
-        Step(type="fill_plate", params={}),
-        Step(type="incubate", params={}),
-    ])
+    llm = MockLLM(outputs=[{"steps": [{"type": "fill_plate", "params": {}}]}])
 
-    runtime = MockRuntimeAdapter(fail_on_method="Method_incubate")
     state = MockStateManager()
 
     loop = ExecutionLoop(
+        llm=llm,
         decomposer=MockDecomposer(),
-        validator=MockValidator(valid=True),
+        validator=MockValidator(valid_sequence=[True]),
         feedback_builder=MockFeedbackBuilder(),
         planner=MockPlanner(),
-        runtime_adapter=runtime,
+        runtime_adapter=MockRuntimeAdapter(fail_on_method="Method_fill_plate"),
         state_manager=state,
-        stop_on_execution_error=True,
+        simulator=MockSimulator(success=True),
     )
 
-    result = loop.run(assay)
-
+    result = loop.run("test IFU")
     assert result.success is False
-    assert len(result.execution_log) == 2
-    assert result.execution_log[-1]["status"] == "failed"
-    # state only updated for the successful first step
-    assert state.executed_steps == ["fill_plate"]
+    assert "Execution failed" in result.error
+    assert state.executed_steps == []

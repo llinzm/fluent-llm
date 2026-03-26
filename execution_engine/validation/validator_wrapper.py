@@ -42,11 +42,8 @@ class ValidatorWrapper:
         errors: List[Dict[str, Any]] = []
         warnings: List[Dict[str, Any]] = []
 
-        # 1) Let the embedded capability-registry validator run first if present.
-        #    We normalize any thrown exception into structured errors.
         if self.registry_validator is not None:
             try:
-                # Flexible call signature: registry validator implementations vary.
                 try:
                     self.registry_validator.validate_step(step, self.registry)
                 except TypeError:
@@ -62,7 +59,6 @@ class ValidatorWrapper:
                     )
                 )
 
-        # 2) Wrapper-level checks: these are stable and planner-facing.
         errors.extend(self._validate_required_fields(step))
         errors.extend(self._validate_tip_volume(step))
         errors.extend(self._validate_liquid_tip_compatibility(step))
@@ -87,10 +83,6 @@ class ValidatorWrapper:
             all_warnings.extend(result.warnings)
 
         return ValidationResult(valid=len(all_errors) == 0, errors=all_errors, warnings=all_warnings)
-
-    # --------------------------------------------------
-    # Stable wrapper checks
-    # --------------------------------------------------
 
     def _validate_required_fields(self, step: Step) -> List[Dict[str, Any]]:
         issues: List[Dict[str, Any]] = []
@@ -138,8 +130,11 @@ class ValidatorWrapper:
             )
             return issues
 
-        max_vol = tip.get("max_volume_uL") or tip.get("max_volume")
-        min_vol = tip.get("min_volume_uL")
+        max_vol = self._value(tip, "max_volume_uL")
+        if max_vol is None:
+            max_vol = self._value(tip, "max_volume")
+        min_vol = self._value(tip, "min_volume_uL")
+
         if max_vol is not None and volume > max_vol:
             issues.append(
                 self._make_issue(
@@ -183,7 +178,11 @@ class ValidatorWrapper:
             )
             return issues
 
-        compatible = lc.get("compatible_tip_types") or lc.get("compatible_tips") or []
+        compatible = self._value(lc, "compatible_tip_types")
+        if not compatible:
+            compatible = self._value(lc, "compatible_tips")
+        compatible = compatible or []
+
         if compatible and tip_type not in compatible:
             issues.append(
                 self._make_issue(
@@ -204,8 +203,6 @@ class ValidatorWrapper:
             if not value:
                 continue
 
-            # Registry stores labware/types in varying shapes. We treat unknown
-            # explicit labware as warning unless the step type makes it mandatory.
             if not self._labware_exists(value):
                 severity = "error" if step.type in ("reagent_distribution", "aspirate", "dispense", "mix") else "warning"
                 issues.append(
@@ -243,32 +240,43 @@ class ValidatorWrapper:
             )
         return warnings
 
-    # --------------------------------------------------
-    # Registry access helpers
-    # --------------------------------------------------
-
-    def _get_tip(self, tip_type: str) -> Optional[Dict[str, Any]]:
+    def _get_tip(self, tip_type: str) -> Optional[Any]:
         if hasattr(self.registry, "get_tip"):
             return self.registry.get_tip(tip_type)
         tips = getattr(self.registry, "tips", {})
         return tips.get(tip_type) if isinstance(tips, dict) else None
 
-    def _get_liquid_class(self, liquid_class: str) -> Optional[Dict[str, Any]]:
+    def _get_liquid_class(self, liquid_class: str) -> Optional[Any]:
         if hasattr(self.registry, "get_liquid_class"):
             return self.registry.get_liquid_class(liquid_class)
         lcs = getattr(self.registry, "liquid_classes", {})
         return lcs.get(liquid_class) if isinstance(lcs, dict) else None
 
     def _labware_exists(self, labware_name: str) -> bool:
+        base_name = labware_name.split(":", 1)[0] if isinstance(labware_name, str) else labware_name
         labware = getattr(self.registry, "labware", None)
+
+        if labware is not None and not isinstance(labware, dict):
+            if hasattr(labware, "types"):
+                types = getattr(labware, "types")
+                if isinstance(types, dict) and base_name in types:
+                    return True
+
         if isinstance(labware, dict):
-            # support both flat and nested shapes
-            if labware_name in labware:
+            if base_name in labware:
                 return True
             types = labware.get("types")
-            if isinstance(types, dict) and labware_name in types:
+            if isinstance(types, dict) and base_name in types:
                 return True
         return False
+
+    @staticmethod
+    def _value(obj: Any, key: str, default: Any = None) -> Any:
+        if obj is None:
+            return default
+        if isinstance(obj, dict):
+            return obj.get(key, default)
+        return getattr(obj, key, default)
 
     @staticmethod
     def _make_issue(issue_type: str, message: str, severity: str, suggestion: List[str], context: Dict[str, Any]) -> Dict[str, Any]:

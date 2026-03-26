@@ -43,7 +43,7 @@ class LLMClient:
         timeout: float = 60.0,
     ) -> None:
         self.provider = provider.lower()
-        self.model = model or "gpt-4o-mini"
+        self.model = model or "gpt-5.4-mini"
         self.api_key = api_key or os.getenv("OPENAI_API_KEY")
         self.max_retries = max_retries
         self.timeout = timeout
