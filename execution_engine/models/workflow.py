@@ -12,7 +12,7 @@ STEP_SCHEMA = {
     "dispense_volume": ["volumes", "labware", "liquid_class", "well_offsets", "tip_indices"],
     "mix_volume": ["volumes", "labware", "liquid_class", "well_offsets", "tip_indices", "cycles"],
     "empty_tips": ["labware", "liquid_class", "well_offsets", "tip_indices"],
-        "reagent_distribution": [
+    "reagent_distribution": [
         "labware_empty_tips", 
         "volumes","sample_count",
         "DiTi_type","DiTi_waste",
