@@ -1,6 +1,5 @@
-
 from dataclasses import dataclass
-from typing import List, Dict, Any
+from typing import Any, Dict, List
 
 @dataclass
 class FeedbackItem:
@@ -8,7 +7,7 @@ class FeedbackItem:
     message: str
     suggestion: List[str]
     context: Dict[str, Any]
-    severity: str  # error or warning
+    severity: str
 
 @dataclass
 class ValidationFeedback:
