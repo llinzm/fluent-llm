@@ -6,6 +6,7 @@ def test_error_taxonomy_contains_core_entries():
     assert "tip_volume_exceeded" in ERROR_TAXONOMY
     assert "liquid_tip_incompatibility" in ERROR_TAXONOMY
     assert "missing_required_field" in ERROR_TAXONOMY
+    assert "unknown_step_type" in ERROR_TAXONOMY
 
 
 def test_build_retry_prompt_contains_human_readable_guidance():

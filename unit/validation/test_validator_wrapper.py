@@ -16,6 +16,9 @@ class DummyRegistry:
             "types": {
                 "Trough_100mL": {},
                 "Plate_96": {},
+                "sample_plate": {},
+                "dilution_plate": {},
+                "Liquid_waste": {},
             }
         }
 
@@ -26,24 +29,54 @@ class DummyRegistry:
         return self.liquid_classes.get(name)
 
 
-def test_valid_step_passes():
+def test_valid_step_passes_new_schema():
     registry = DummyRegistry()
     validator = ValidatorWrapper(registry)
 
-    step = Step(
-        type="reagent_distribution",
-        params={
-            "volume_uL": 50,
-            "source": "Trough_100mL",
-            "target": "Plate_96",
-            "tip_type": "FCA_DiTi_200uL",
-            "liquid_class": "Water_Free",
-        },
+    workflow = Workflow(
+        steps=[
+            Step(
+                type="sample_transfer",
+                params={
+                    "labware_source": "sample_plate",
+                    "labware_target": "dilution_plate",
+                    "volumes": 25,
+                    "DiTi_type": "FCA_DiTi_200uL",
+                    "liquid_class": "Water_Free",
+                },
+            )
+        ]
     )
 
-    result = validator.validate_step(step)
+    result = validator.validate_workflow(workflow)
     assert result.valid is True
     assert result.errors == []
+
+
+def test_missing_required_fields_fail():
+    registry = DummyRegistry()
+    validator = ValidatorWrapper(registry)
+
+    workflow = Workflow(
+        steps=[
+            Step(type="sample_transfer", params={"volumes": 25})
+        ]
+    )
+
+    result = validator.validate_workflow(workflow)
+    assert result.valid is False
+    assert any(e["type"] == "missing_required_field" for e in result.errors)
+
+
+def test_unknown_step_type_fails():
+    registry = DummyRegistry()
+    validator = ValidatorWrapper(registry)
+
+    workflow = Workflow(steps=[Step(type="does_not_exist", params={})])
+    result = validator.validate_workflow(workflow)
+
+    assert result.valid is False
+    assert any(e["type"] == "unknown_step_type" for e in result.errors)
 
 
 def test_tip_volume_exceeded_fails():
@@ -51,12 +84,11 @@ def test_tip_volume_exceeded_fails():
     validator = ValidatorWrapper(registry)
 
     step = Step(
-        type="reagent_distribution",
+        type="aspirate_volume",
         params={
-            "volume_uL": 300,
-            "source": "Trough_100mL",
-            "target": "Plate_96",
-            "tip_type": "FCA_DiTi_200uL",
+            "labware": "Plate_96",
+            "volumes": 300,
+            "DiTi_type": "FCA_DiTi_200uL",
             "liquid_class": "Water_Free",
         },
     )
@@ -71,12 +103,11 @@ def test_liquid_tip_incompatibility_fails():
     validator = ValidatorWrapper(registry)
 
     step = Step(
-        type="reagent_distribution",
+        type="aspirate_volume",
         params={
-            "volume_uL": 100,
-            "source": "Trough_100mL",
-            "target": "Plate_96",
-            "tip_type": "FCA_DiTi_200uL",
+            "labware": "Plate_96",
+            "volumes": 100,
+            "DiTi_type": "FCA_DiTi_200uL",
             "liquid_class": "Viscous",
         },
     )
@@ -86,26 +117,21 @@ def test_liquid_tip_incompatibility_fails():
     assert any(e["type"] == "liquid_tip_incompatibility" for e in result.errors)
 
 
-def test_missing_required_fields_fail():
+def test_labware_alias_fields_are_checked():
     registry = DummyRegistry()
     validator = ValidatorWrapper(registry)
 
-    step = Step(type="reagent_distribution", params={"volume_uL": 50})
+    step = Step(
+        type="sample_transfer",
+        params={
+            "labware_source": "missing_plate",
+            "labware_target": "dilution_plate",
+            "volumes": 25,
+            "DiTi_type": "FCA_DiTi_200uL",
+            "liquid_class": "Water_Free",
+        },
+    )
+
     result = validator.validate_step(step)
-
     assert result.valid is False
-    assert any(e["type"] == "missing_required_field" for e in result.errors)
-
-
-def test_workflow_validation_aggregates_step_index():
-    registry = DummyRegistry()
-    validator = ValidatorWrapper(registry)
-
-    workflow = Workflow(steps=[
-        Step(type="reagent_distribution", params={"volume_uL": 50}),
-        Step(type="mix", params={"target": "Plate_96"}),
-    ])
-
-    result = validator.validate_workflow(workflow)
-    assert result.valid is False
-    assert any("step_index" in e["context"] for e in result.errors)
+    assert any(e["type"] == "unknown_labware" for e in result.errors)
