@@ -2,232 +2,156 @@
 
 ## 🎯 Overview
 
-The `validation` package is the **safety and correctness layer** of the execution engine.
+The `validation` package is the safety and correctness layer of the execution engine.
 
 It ensures that workflows are:
-- structurally valid (schema)
-- physically feasible (tips, volumes, labware)
-- compliant with system capabilities (registry)
+- structurally valid against `STEP_SCHEMA`
+- semantically valid (tips, volumes, liquids, labware)
+- aligned with system capabilities through the registry
 
-It also transforms validation failures into **structured feedback** for retry loops.
+It also converts failures into structured feedback for retry loops.
 
-👉 In short:  
-**Workflow → Valid / Invalid → Actionable Feedback**
-
----
-
-## 🧱 Validation Flow
-
-Workflow
- ↓
-Schema Validation (STEP_SCHEMA)
- ↓
-Step Validation
- ↓
-Registry Validation
- ↓
-Errors / Warnings
- ↓
-Feedback Builder
- ↓
-Retry Prompt (LLM mode)
+👉 In short: **Workflow → Valid / Invalid → Actionable Feedback**
 
 ---
 
 ## 🧩 Modules
 
-### 1. validator_wrapper.py (Core Validator)
-
-Main entry point.
+### 1. `validator_wrapper.py`
+Main validation entry point.
 
 Responsibilities:
-- Workflow-level validation
-- Step-level validation
-- Registry integration
-- Structured error generation
+- workflow-level schema validation
+- step-level semantic validation
+- registry integration
+- structured error / warning generation
 
-```python
-result = validator.validate_workflow(workflow)
-```
-
----
-
-### 2. feedback_builder.py
-
-Transforms validation results into:
-
-- Typed feedback objects
+### 2. `feedback_builder.py`
+Converts validation results into:
+- typed feedback objects
 - LLM-ready retry prompts
 
-```python
-prompt = feedback_builder.build_retry_prompt(result)
-```
+### 3. Error taxonomy
+Standardizes issue types such as:
+- `missing_required_field`
+- `unknown_step_type`
+- `tip_volume_exceeded`
+- `unknown_labware`
+- `liquid_tip_incompatibility`
 
 ---
 
-### 3. Error Taxonomy
-
-Defined in `feedback_builder.py`
-
-Standardizes errors such as:
-- missing_required_field
-- tip_volume_exceeded
-- unknown_labware
-- liquid_tip_incompatibility
-
-👉 Ensures consistent feedback across system
-
----
-
-## ⚙️ How Validation Works
-
-### Step 1 — Schema Validation
-
-```python
-required_fields = STEP_SCHEMA.get(step.type, [])
-missing = [f for f in required_fields if step.params.get(f) in (None, "")]
-```
-
-Ensures structural correctness.
-
----
-
-### Step 2 — Step Validation
-
-```python
-result = validator.validate_step(step)
-```
-
-Checks:
-- tip volume limits
-- liquid compatibility
-- labware presence
-
----
-
-### Step 3 — Registry Validation
-
-```python
-registry_validator.validate_step(step)
-```
-
-Ensures step aligns with system capabilities.
-
----
-
-### Step 4 — Aggregate Results
-
-```python
-ValidationResult(
-    valid=True/False,
-    errors=[...],
-    warnings=[...]
-)
-```
-
----
-
-### Step 5 — Feedback Generation
-
-```python
-retry_prompt = feedback_builder.build_retry_prompt(result)
-```
-
-Produces:
+## 🧱 Validation Flow
 
 ```text
-The assay you generated is invalid.
-Fix the following issues...
+Workflow
+↓
+STEP_SCHEMA validation
+↓
+Step semantic validation
+↓
+Registry-aware checks
+↓
+Structured errors / warnings
+↓
+FeedbackBuilder → retry prompt
 ```
+
+---
+
+## ⚙️ What gets validated
+
+### Schema validation
+Uses `STEP_SCHEMA` from `execution_engine.models.workflow`.
+
+Example:
+```python
+required_fields = STEP_SCHEMA[step.type]["required"]
+```
+
+This checks that each step includes the minimum required parameters.
+
+### Semantic validation
+Checks values such as:
+- tip volume within allowed range
+- liquid class compatibility with tip type
+- existence of referenced labware
+
+### Registry validation
+If a lower-level registry validator is provided, it is called and any exceptions are normalized into structured issues.
 
 ---
 
 ## 🧪 Minimal Example
 
 ```python
+from execution_engine.models.workflow import Workflow, Step
 from execution_engine.validation.validator_wrapper import ValidatorWrapper
 from execution_engine.validation.feedback_builder import FeedbackBuilder
 
-validator = ValidatorWrapper(registry)
-feedback_builder = FeedbackBuilder()
+workflow = Workflow(
+    steps=[
+        Step(
+            type="sample_transfer",
+            params={
+                "labware_source": "sample_plate",
+                "labware_target": "dilution_plate",
+                "volumes": 25,
+                "DiTi_type": "FCA_DiTi_200uL",
+                "liquid_class": "Water_Free",
+            },
+        )
+    ]
+)
 
+validator = ValidatorWrapper(registry)
 result = validator.validate_workflow(workflow)
 
 if not result.valid:
+    feedback_builder = FeedbackBuilder()
     prompt = feedback_builder.build_retry_prompt(result)
     print(prompt)
 ```
 
 ---
 
-## 🧠 Key Concepts
+## 🔁 Retry Loop Usage
 
-### 1. Two-Level Validation
-
-| Level | Purpose |
-|------|--------|
-| Workflow | schema validation |
-| Step | semantic validation |
-
----
-
-### 2. Separation of Concerns
-
-- Schema → models (STEP_SCHEMA)
-- Validation → this module
-- Registry → capability_registry
-
----
-
-### 3. Structured Feedback
-
-All issues follow a consistent format:
+Typical orchestration pattern:
 
 ```python
-{
-    "type": "...",
-    "message": "...",
-    "suggestion": [...],
-    "context": {...},
-    "severity": "error" | "warning"
-}
+result = validator.validate_workflow(workflow)
+
+if not result.valid:
+    retry_prompt = feedback_builder.build_retry_prompt(result)
+    # send retry_prompt back to LLM
 ```
 
----
-
-### 4. Deterministic Behavior
-
-Same input → same validation result
+Library / deterministic mode can fail fast without retry.
 
 ---
 
-### 5. LLM Feedback Loop
+## 🧠 Design Principles
 
-```text
-Validation → Feedback → LLM → Improved Workflow
-```
-
----
-
-## 🚀 Future Improvements
-
-- Auto-repair suggestions (not just errors)
-- Validation-aware planning
-- Confidence scoring
-- Runtime feedback integration
+- `STEP_SCHEMA` is the single source of truth for required fields
+- semantic validation stays separate from structural validation
+- validation returns structured data, not ad hoc strings
+- field aliases are supported where needed (`tip_type`, `DiTi_type`, `diti_type`)
 
 ---
 
 ## 📌 Summary
 
-The validation layer acts as the **safety gate**:
+The validation package is both:
 
 ```text
-Workflow → Checked → Safe → Executable
+Safety gate
 ```
 
-and as the **bridge to intelligence**:
+and
 
 ```text
-Failure → Structured Feedback → Self-Correction
+Bridge to intelligent correction
 ```
+
+It protects execution while enabling retry-driven improvement of workflows.

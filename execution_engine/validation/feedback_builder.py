@@ -6,43 +6,47 @@ from execution_engine.models.feedback import FeedbackItem, ValidationFeedback
 ERROR_TAXONOMY: Dict[str, Dict[str, str]] = {
     "missing_required_field": {
         "category": "schema",
-        "llm_guidance": "Regenerate the assay with all required fields present for the affected step."
+        "llm_guidance": "Regenerate the assay with all required fields present for the affected step.",
+    },
+    "unknown_step_type": {
+        "category": "schema",
+        "llm_guidance": "Use only supported step types defined by the workflow schema.",
     },
     "unknown_tip_type": {
         "category": "registry",
-        "llm_guidance": "Use a tip type that exists in the capability registry."
+        "llm_guidance": "Use a tip type that exists in the capability registry.",
     },
     "tip_volume_exceeded": {
         "category": "volume",
-        "llm_guidance": "Use a larger tip or split the transfer into smaller operations."
+        "llm_guidance": "Use a larger tip or split the transfer into smaller operations.",
     },
     "tip_volume_below_minimum": {
         "category": "volume",
-        "llm_guidance": "Use a smaller tip or adjust the transferred volume."
+        "llm_guidance": "Use a smaller tip or adjust the transferred volume.",
     },
     "unknown_liquid_class": {
         "category": "registry",
-        "llm_guidance": "Use a liquid class defined in the capability registry."
+        "llm_guidance": "Use a liquid class defined in the capability registry.",
     },
     "liquid_tip_incompatibility": {
         "category": "compatibility",
-        "llm_guidance": "Choose a tip compatible with the liquid class, or change the liquid class."
+        "llm_guidance": "Choose a tip compatible with the liquid class, or change the liquid class.",
     },
     "unknown_labware": {
         "category": "registry",
-        "llm_guidance": "Use configured labware or extend the capability registry."
+        "llm_guidance": "Use configured labware or extend the capability registry.",
     },
     "tip_not_specified": {
         "category": "inference",
-        "llm_guidance": "Specify the tip explicitly or rely on planner-side tip selection."
+        "llm_guidance": "Specify the tip explicitly or rely on planner-side tip selection.",
     },
     "liquid_class_not_specified": {
         "category": "inference",
-        "llm_guidance": "Specify the liquid class explicitly or enable liquid inference."
+        "llm_guidance": "Specify the liquid class explicitly or enable liquid inference.",
     },
     "registry_validation_error": {
         "category": "registry",
-        "llm_guidance": "Regenerate the assay so that it respects capability-registry constraints."
+        "llm_guidance": "Regenerate the assay so that it respects capability-registry constraints.",
     },
 }
 
@@ -63,10 +67,12 @@ class FeedbackBuilder:
         lines: List[str] = []
         lines.append("The assay you generated is invalid.")
         lines.append("")
+
         if feedback.errors:
             lines.append("Issues:")
             for idx, err in enumerate(feedback.errors, start=1):
                 lines.extend(self._render_feedback_item(idx, err))
+
         if feedback.warnings:
             lines.append("")
             lines.append("Warnings:")
@@ -74,7 +80,7 @@ class FeedbackBuilder:
                 lines.extend(self._render_feedback_item(idx, warn, numbered=False))
 
         lines.append("")
-        lines.append("Please regenerate a corrected assay in the same {} format.".format(original_format))
+        lines.append(f"Please regenerate a corrected assay in the same {original_format} format.")
         lines.append("Do not change steps that are already valid unless needed to fix the issues above.")
         lines.append("Respect the capability registry constraints.")
 
@@ -93,7 +99,6 @@ class FeedbackBuilder:
             lines.append(f"   Suggestions: {', '.join(item.suggestion)}")
 
         if item.context:
-            # Keep it compact and readable for prompt use
             compact = ", ".join([f"{k}={v}" for k, v in item.context.items()])
             lines.append(f"   Context: {compact}")
 

@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from execution_engine.models.feedback import FeedbackItem, ValidationFeedback
 from execution_engine.models.workflow import Step, STEP_SCHEMA
@@ -20,19 +20,24 @@ class ValidationResult:
 
 class ValidatorWrapper:
     """
-    Thin orchestration layer around capability-registry validation.
+    Validation layer around workflow steps and capability-registry constraints.
 
     Responsibilities:
-    - normalize validation around workflow Step objects
-    - apply additional planner/runtime-facing checks
-    - return structured errors/warnings for the feedback loop
-
-    Notes:
-    - This wrapper is intentionally tolerant of evolving registry shapes
-      (dict-like or object-like).
-    - It can work even if a lower-level registry validator is not yet
-      fully implemented, by applying wrapper-level checks.
+    - schema validation using STEP_SCHEMA
+    - semantic validation (volume / liquid / labware)
+    - normalization across evolving field names
+    - structured feedback generation
     """
+
+    TRANSFER_STEP_TYPES = {
+        "reagent_distribution",
+        "sample_transfer",
+        "aspirate_volume",
+        "dispense_volume",
+        "mix_volume",
+        "reagent_distribution_simple",
+        "mix",
+    }
 
     def __init__(self, registry, registry_validator: Optional[Any] = None):
         self.registry = registry
@@ -42,9 +47,6 @@ class ValidatorWrapper:
         errors: List[Dict[str, Any]] = []
         warnings: List[Dict[str, Any]] = []
 
-        # ---------------------------------------------
-        # Registry-level validation (device, method, etc.)
-        # ---------------------------------------------
         if self.registry_validator is not None:
             try:
                 try:
@@ -62,53 +64,47 @@ class ValidatorWrapper:
                     )
                 )
 
-        # ---------------------------------------------
-        # Semantic validation only
-        # ---------------------------------------------
         errors.extend(self._validate_tip_volume(step))
         errors.extend(self._validate_liquid_tip_compatibility(step))
         errors.extend(self._validate_labware_presence(step))
-
-        # ---------------------------------------------
-        # Warnings (soft checks)
-        # ---------------------------------------------
         warnings.extend(self._validate_unknowns(step))
 
-        return ValidationResult(
-            valid=len(errors) == 0,
-            errors=errors,
-            warnings=warnings
-        )
+        return ValidationResult(valid=len(errors) == 0, errors=errors, warnings=warnings)
 
     def validate_workflow(self, workflow) -> ValidationResult:
         all_errors: List[Dict[str, Any]] = []
         all_warnings: List[Dict[str, Any]] = []
 
         for idx, step in enumerate(workflow.steps):
-            # ---------------------------------------------
-            # 1) Schema-level required field validation
-            # ---------------------------------------------
-            required_fields = STEP_SCHEMA.get(step.type, [])
-            missing = [f for f in required_fields if f not in step.params]
-
-            if missing:
+            schema = STEP_SCHEMA.get(step.type)
+            if schema is None:
                 all_errors.append(
                     self._make_issue(
-                        issue_type="missing_required_field",
-                        message=f"Missing required fields for step '{step.type}': {missing}",
+                        issue_type="unknown_step_type",
+                        message=f"Unknown step type '{step.type}'",
                         severity="error",
-                        suggestion=[f"Add values for: {', '.join(missing)}"],
-                        context={
-                            "step_type": step.type,
-                            "missing_fields": missing,
-                            "step_index": idx,
-                        },
+                        suggestion=["Use a supported step type defined in STEP_SCHEMA."],
+                        context={"step_type": step.type, "step_index": idx},
                     )
                 )
+            else:
+                required_fields = schema.get("required", [])
+                missing = [f for f in required_fields if step.params.get(f) in (None, "")]
+                if missing:
+                    all_errors.append(
+                        self._make_issue(
+                            issue_type="missing_required_field",
+                            message=f"Missing required fields for step '{step.type}': {missing}",
+                            severity="error",
+                            suggestion=[f"Add values for: {', '.join(missing)}"],
+                            context={
+                                "step_type": step.type,
+                                "missing_fields": missing,
+                                "step_index": idx,
+                            },
+                        )
+                    )
 
-            # ---------------------------------------------
-            # 2) Existing step validation
-            # ---------------------------------------------
             result = self.validate_step(step)
 
             for err in result.errors:
@@ -128,35 +124,10 @@ class ValidatorWrapper:
             warnings=all_warnings,
         )
 
-    def _validate_required_fields(self, step: Step) -> List[Dict[str, Any]]:
-        issues: List[Dict[str, Any]] = []
-
-        required_by_step = {
-            "reagent_distribution": ["volume_uL", "source", "target"],
-            "aspirate": ["volume_uL", "source"],
-            "dispense": ["volume_uL", "target"],
-            "mix": ["target"],
-            "incubate": [],
-        }
-
-        required = required_by_step.get(step.type, [])
-        missing = [field for field in required if step.params.get(field) in (None, "")]
-        if missing:
-            issues.append(
-                self._make_issue(
-                    issue_type="missing_required_field",
-                    message=f"Missing required fields for step '{step.type}': {missing}",
-                    severity="error",
-                    suggestion=[f"Add values for: {', '.join(missing)}"],
-                    context={"step_type": step.type, "missing_fields": missing},
-                )
-            )
-        return issues
-
     def _validate_tip_volume(self, step: Step) -> List[Dict[str, Any]]:
         issues: List[Dict[str, Any]] = []
-        volume = step.params.get("volume_uL")
-        tip_type = step.params.get("tip_type")
+        volume = self._extract_volume(step)
+        tip_type = self._extract_tip_type(step)
 
         if volume is None or tip_type is None:
             return issues
@@ -199,12 +170,13 @@ class ValidatorWrapper:
                     context={"tip_type": tip_type, "requested_volume_uL": volume, "min_volume_uL": min_vol},
                 )
             )
+
         return issues
 
     def _validate_liquid_tip_compatibility(self, step: Step) -> List[Dict[str, Any]]:
         issues: List[Dict[str, Any]] = []
-        liquid_class = step.params.get("liquid_class")
-        tip_type = step.params.get("tip_type")
+        liquid_class = self._extract_liquid_class(step)
+        tip_type = self._extract_tip_type(step)
 
         if not liquid_class or not tip_type:
             return issues
@@ -237,52 +209,71 @@ class ValidatorWrapper:
                     context={"liquid_class": liquid_class, "tip_type": tip_type, "compatible_tips": compatible},
                 )
             )
+
         return issues
 
     def _validate_labware_presence(self, step: Step) -> List[Dict[str, Any]]:
         issues: List[Dict[str, Any]] = []
+        roles: List[Tuple[str, Any]] = []
 
-        for role in ("source", "target"):
-            value = step.params.get(role)
-            if not value:
-                continue
+        for field_name in ["source", "target", "labware", "labware_source", "labware_target", "labware_empty_tips", "labware_name"]:
+            value = step.params.get(field_name)
+            if value not in (None, ""):
+                roles.append((field_name, value))
 
+        for role, value in roles:
             if not self._labware_exists(value):
-                severity = "error" if step.type in ("reagent_distribution", "aspirate", "dispense", "mix") else "warning"
                 issues.append(
                     self._make_issue(
                         issue_type="unknown_labware",
-                        message=f"{role.title()} labware '{value}' is not present in the capability registry",
-                        severity=severity,
+                        message=f"{role} '{value}' is not present in the capability registry",
+                        severity="error",
                         suggestion=["Use a configured labware entry", "Extend the registry with this labware"],
                         context={"role": role, "labware": value},
                     )
                 )
+
         return issues
 
     def _validate_unknowns(self, step: Step) -> List[Dict[str, Any]]:
         warnings: List[Dict[str, Any]] = []
-        if not step.params.get("tip_type"):
-            warnings.append(
-                self._make_issue(
-                    issue_type="tip_not_specified",
-                    message="No tip type specified; planner may need to infer or select a tip later",
-                    severity="warning",
-                    suggestion=["Provide a tip type or enable automatic tip selection"],
-                    context={"step_type": step.type},
+
+        if step.type in self.TRANSFER_STEP_TYPES:
+            if self._extract_tip_type(step) is None:
+                warnings.append(
+                    self._make_issue(
+                        issue_type="tip_not_specified",
+                        message="No tip type specified; planner may need to infer or select a tip later",
+                        severity="warning",
+                        suggestion=["Provide a tip type or enable automatic tip selection"],
+                        context={"step_type": step.type},
+                    )
                 )
-            )
-        if not step.params.get("liquid_class"):
-            warnings.append(
-                self._make_issue(
-                    issue_type="liquid_class_not_specified",
-                    message="No liquid class specified; planner may need to infer it later",
-                    severity="warning",
-                    suggestion=["Provide a liquid class or enable liquid class inference"],
-                    context={"step_type": step.type},
+            if self._extract_liquid_class(step) is None:
+                warnings.append(
+                    self._make_issue(
+                        issue_type="liquid_class_not_specified",
+                        message="No liquid class specified; planner may need to infer it later",
+                        severity="warning",
+                        suggestion=["Provide a liquid class or enable liquid class inference"],
+                        context={"step_type": step.type},
+                    )
                 )
-            )
+
         return warnings
+
+    def _extract_tip_type(self, step: Step) -> Optional[str]:
+        return (
+            step.params.get("tip_type")
+            or step.params.get("DiTi_type")
+            or step.params.get("diti_type")
+        )
+
+    def _extract_volume(self, step: Step) -> Optional[Any]:
+        return step.params.get("volume_uL") if step.params.get("volume_uL") is not None else step.params.get("volumes")
+
+    def _extract_liquid_class(self, step: Step) -> Optional[str]:
+        return step.params.get("liquid_class")
 
     def _get_tip(self, tip_type: str) -> Optional[Any]:
         if hasattr(self.registry, "get_tip"):
@@ -312,6 +303,7 @@ class ValidatorWrapper:
             types = labware.get("types")
             if isinstance(types, dict) and base_name in types:
                 return True
+
         return False
 
     @staticmethod
